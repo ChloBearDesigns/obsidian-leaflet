@@ -19,3 +19,5 @@ webpack.dev.js
 main.js
 styles.css
 main.css
+# webpack banner artifact
+main.js.LICENSE.txt

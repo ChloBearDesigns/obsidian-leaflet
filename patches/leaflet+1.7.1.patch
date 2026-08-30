@@ -1,0 +1,156 @@
+diff --git a/node_modules/leaflet/dist/leaflet-src.js b/node_modules/leaflet/dist/leaflet-src.js
+index 9acc7da..23a1cbe 100644
+--- a/node_modules/leaflet/dist/leaflet-src.js
++++ b/node_modules/leaflet/dist/leaflet-src.js
+@@ -1901,15 +1901,30 @@
+ 
+   // @property pointer: Boolean
+   // `true` for all browsers supporting [pointer events](https://msdn.microsoft.com/en-us/library/dn433244%28v=vs.85%29.aspx).
+-  var pointer = !!(window.PointerEvent || msPointer);
++  //
++  // obsidian-leaflet pop-out patch: Chromium/Electron always exposes
++  // `window.PointerEvent`, so Leaflet routes drag interactions through the
++  // `DomEvent.Pointer` shim. That shim registers its `_globalPointerMove` /
++  // `_globalPointerUp` listeners on the *main* window's `document`. When a map
++  // is shown in an Obsidian pop-out (a separate BrowserWindow with its own
++  // document) those listeners never see the pop-out's events, so `Draggable`
++  // gets a zero movement delta and the map cannot be panned. Forcing the
++  // plain-mouse code path (`mousedown`/`mousemove`/`mouseup`) sidesteps the
++  // shim entirely; combined with the `Draggable` document-binding patch below
++  // the events reach the right window. This plugin is desktop-only, and
++  // browsers still synthesise mouse events for touchscreen taps/drags.
++  var pointer = false;
+ 
+   // @property touch: Boolean
+   // `true` for all browsers supporting [touch events](https://developer.mozilla.org/docs/Web/API/Touch_events).
+   // This does not necessarily mean that the browser is running in a computer with
+   // a touchscreen, it only means that the browser is capable of understanding
+   // touch events.
+-  var touch = !window.L_NO_TOUCH && (pointer || 'ontouchstart' in window ||
+-  		(window.DocumentTouch && document instanceof window.DocumentTouch));
++  //
++  // obsidian-leaflet pop-out patch: forced off alongside `pointer` (above) so
++  // `Draggable` binds `mousedown`/`mousemove`/`mouseup` rather than the
++  // touch/pointer variants.
++  var touch = false;
+ 
+   // @property mobileOpera: Boolean; `true` for the Opera browser in a mobile device.
+   var mobileOpera = mobile && opera;
+@@ -5857,8 +5872,35 @@
+   		// Cache the scale, so that we can continuously compensate for it during drag (_onMove).
+   		this._parentScale = getScale(sizedParent);
+ 
+-  		on(document, MOVE[e.type], this._onMove, this);
+-  		on(document, END[e.type], this._onUp, this);
++  		// obsidian-leaflet pop-out patch: Leaflet listens for the drag's
++  		// move/end on the module-global `document` (the main window). When the
++  		// dragged element lives in an Obsidian pop-out window, that is the
++  		// wrong document and the drag never progresses (and, because
++  		// `Draggable._dragging` is never cleared, every other map stops
++  		// dragging too). Bind on the element's own document as well as the
++  		// global one, de-duplicated, and remember the set for finishDrag().
++  		var moveDocs = [];
++  		var addDoc = function (d) {
++  			if (d && d.nodeType === 9 && moveDocs.indexOf(d) === -1) { moveDocs.push(d); }
++  		};
++  		addDoc(document);
++  		if (this._element) {
++  			addDoc(this._element.ownerDocument);
++  			if (this._element.getRootNode) { addDoc(this._element.getRootNode()); }
++  		}
++  		this._moveDocs = moveDocs;
++  		this._dragWindows = [];
++  		for (var d = 0; d < moveDocs.length; d++) {
++  			on(moveDocs[d], MOVE[e.type], this._onMove, this);
++  			on(moveDocs[d], END[e.type], this._onUp, this);
++  			// disableImageDrag() only covers the main window; suppress the
++  			// native image drag-and-drop in each involved window too.
++  			var w = moveDocs[d].defaultView;
++  			if (w && this._dragWindows.indexOf(w) === -1) {
++  				this._dragWindows.push(w);
++  				on(w, 'dragstart', preventDefault);
++  			}
++  		}
+   	},
+ 
+   	_onMove: function (e) {
+@@ -5910,9 +5952,28 @@
+   		this._newPos = this._startPos.add(offset);
+   		this._moving = true;
+ 
+-  		cancelAnimFrame(this._animRequest);
+   		this._lastEvent = e;
+-  		this._animRequest = requestAnimFrame(this._updatePosition, this, true);
++
++  		// obsidian-leaflet pop-out patch: `requestAnimFrame` is bound to the
++  		// main window. If the map is shown in a pop-out that fully covers the
++  		// main window, Chromium suspends the main window's animation frames and
++  		// `_updatePosition` (the call that actually moves the pane) never runs.
++  		// Schedule on the element's own window instead, with a synchronous
++  		// fallback.
++  		var dragWin = (this._element && this._element.ownerDocument && this._element.ownerDocument.defaultView) || window;
++  		if (this._animWindow && this._animWindow.cancelAnimationFrame && this._animRequest) {
++  			this._animWindow.cancelAnimationFrame(this._animRequest);
++  		} else {
++  			cancelAnimFrame(this._animRequest);
++  		}
++  		if (dragWin.requestAnimationFrame) {
++  			var self = this;
++  			this._animWindow = dragWin;
++  			this._animRequest = dragWin.requestAnimationFrame(function () { self._updatePosition(); });
++  		} else {
++  			this._animWindow = null;
++  			this._updatePosition();
++  		}
+   	},
+ 
+   	_updatePosition: function () {
+@@ -5941,23 +6002,44 @@
+ 
+   	finishDrag: function () {
+   		removeClass(document.body, 'leaflet-dragging');
++  		// obsidian-leaflet pop-out patch: also clear the pop-out document's body.
++  		var ownerDoc = (this._element && this._element.ownerDocument) || document;
++  		if (ownerDoc !== document) { removeClass(ownerDoc.body, 'leaflet-dragging'); }
+ 
+   		if (this._lastTarget) {
+   			removeClass(this._lastTarget, 'leaflet-drag-target');
+   			this._lastTarget = null;
+   		}
+ 
+-  		for (var i in MOVE) {
+-  			off(document, MOVE[i], this._onMove, this);
+-  			off(document, END[i], this._onUp, this);
++  		// obsidian-leaflet pop-out patch: unbind from every document/window the
++  		// matching _onDown() bound to (falls back to the global document).
++  		var moveDocs = this._moveDocs || [document];
++  		for (var md = 0; md < moveDocs.length; md++) {
++  			for (var i in MOVE) {
++  				off(moveDocs[md], MOVE[i], this._onMove, this);
++  				off(moveDocs[md], END[i], this._onUp, this);
++  			}
++  		}
++  		var dragWindows = this._dragWindows || [];
++  		for (var dw = 0; dw < dragWindows.length; dw++) {
++  			off(dragWindows[dw], 'dragstart', preventDefault);
+   		}
++  		this._moveDocs = null;
++  		this._dragWindows = [];
+ 
+   		enableImageDrag();
+   		enableTextSelection();
+ 
+   		if (this._moved && this._moving) {
+   			// ensure drag is not fired after dragend
+-  			cancelAnimFrame(this._animRequest);
++  			if (this._animWindow && this._animWindow.cancelAnimationFrame && this._animRequest) {
++  				this._animWindow.cancelAnimationFrame(this._animRequest);
++  			} else {
++  				cancelAnimFrame(this._animRequest);
++  			}
++  			// obsidian-leaflet pop-out patch: flush the final position in case
++  			// the last scheduled frame had not run yet.
++  			this._updatePosition();
+ 
+   			// @event dragend: DragEndEvent
+   			// Fired when the drag ends.
