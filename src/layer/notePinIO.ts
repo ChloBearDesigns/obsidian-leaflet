@@ -56,8 +56,10 @@ export async function writeNotePin(
         }
         applyPinToFrontmatter(fm, change);
     });
-    // Obsidian writes numeric lists in block style; keep pins as `location: [lat, lng]`.
-    if (change.location) {
+    // Obsidian re-serialises the whole frontmatter and writes numeric lists in block style,
+    // so any write (a type change too, not just a move) can turn `location: [1, 2]` into a
+    // block list. Keep pins as `location: [lat, lng]`.
+    if (!change.remove) {
         await app.vault.process(file, flowLocationInText);
     }
 }
