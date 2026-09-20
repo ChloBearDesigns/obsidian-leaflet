@@ -473,6 +473,39 @@ export default class ObsidianLeaflet extends Plugin {
         }
         await this.saveSettings();
     }
+    /**
+     * Obsidian calls this when data.json changes on disk from outside the plugin
+     * (a hand edit, a sync). Without it the plugin keeps its in-memory copy and the
+     * next save writes it back over the edit. Reload plugin-owned markers and refresh
+     * the open maps; never write the file as a side effect.
+     */
+    async onExternalSettingsChange() {
+        const saved = await this.loadData();
+        if (!saved) return;
+        const incoming = saved.mapMarkers ?? [];
+        if (JSON.stringify(incoming) === JSON.stringify(this.data.mapMarkers)) {
+            return;
+        }
+        this.data.mapMarkers = incoming;
+
+        for (const { map, id } of this.maps) {
+            const mapData = incoming.find(({ id: mapId }) => mapId == id);
+            for (const marker of [...map.markers].filter((m) => m.mutable)) {
+                marker.remove();
+                map.markers = map.markers.filter((m) => m.id != marker.id);
+            }
+            map.addMarker(
+                ...(mapData?.markers?.map((m) => {
+                    const layer =
+                        decodeURIComponent(m.layer) === m.layer
+                            ? encodeURIComponent(m.layer)
+                            : m.layer;
+                    return { ...m, mutable: true, layer };
+                }) ?? [])
+            );
+            map.trigger("markers-updated");
+        }
+    }
     saveSettings = debounce(
         async () => {
             this.maps.forEach((map) => {

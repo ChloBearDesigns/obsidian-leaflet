@@ -7,6 +7,7 @@
         "postinstall": "patch-package",
         "dev": "export NODE_ENV=development && npm run build",
         "build": "webpack",
+        "test": "node --experimental-strip-types --test tests/*.test.ts",
         "dev-es": "node ./esbuild.config.mjs",
         "build-es": "node ./esbuild.config.mjs production"
     },

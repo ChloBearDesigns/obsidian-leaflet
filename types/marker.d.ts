@@ -24,6 +24,10 @@ export interface MarkerProperties {
     minZoom?: number;
     maxZoom?: number;
     tooltip?: TooltipDisplay;
+    /** Drawn from a note's own `location` frontmatter and editable from the map. */
+    source?: "frontmatter";
+    /** Vault path of the note a `source: "frontmatter"` marker writes back to. */
+    notePath?: string;
 }
 
 export interface SavedMarkerProperties {
@@ -45,4 +49,6 @@ export interface SavedMarkerProperties {
     minZoom: number;
     maxZoom: number;
     tooltip: TooltipDisplay;
+    source?: "frontmatter";
+    notePath?: string;
 }

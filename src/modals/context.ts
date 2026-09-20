@@ -64,6 +64,20 @@ export class MarkerContextModal extends Modal {
                     this.tempMarker.type = newMarker.type;
                 });
             });
+        if (this.marker.source === "frontmatter") {
+            // Note-backed pin: only the type (and removal) map to the note's frontmatter.
+            new Setting(this.contentEl).addButton((b) => {
+                b.setIcon("trash")
+                    .setWarning()
+                    .setTooltip(t("Delete Marker"))
+                    .onClick(() => {
+                        this.deleted = true;
+                        this.close();
+                    });
+                return b;
+            });
+            return;
+        }
         if (this.tempMarker.command) {
             new Setting(this.contentEl)
                 .setName(t("Command to Execute"))

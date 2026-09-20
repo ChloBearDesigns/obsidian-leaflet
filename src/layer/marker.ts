@@ -14,6 +14,14 @@ import { Layer } from "../layer/layer";
 import { popup } from "src/map/popup";
 import { MODIFIER_KEY, OBSIDIAN_LEAFLET_POPOVER_SOURCE } from "src/utils";
 import { copyToClipboard, formatLatLng } from "src/utils";
+import { roundPin, withinBounds } from "src/utils/notePin";
+import type { Pin } from "src/utils/notePin";
+import {
+    NoteChangedError,
+    confirmPinRemoval,
+    readNotePin,
+    writeNotePin
+} from "./notePinIO";
 
 import { LeafletSymbol } from "../utils/leaflet-import";
 import t from "src/l10n/locale";
@@ -185,6 +193,11 @@ export class Marker extends Layer<DivIconMarker> {
     private _icon: MarkerIcon;
     isBeingHovered: boolean = false;
     private _link: string;
+    /** `"frontmatter"`: drawn from a note's `location`; editable and written back to `notePath`. */
+    source?: "frontmatter";
+    notePath?: string;
+    /** The `location` the note held when the map last read or wrote it. */
+    private pinOnDisk?: Pin;
     constructor(
         public map: BaseMapType,
         {
@@ -199,10 +212,15 @@ export class Marker extends Layer<DivIconMarker> {
             description,
             minZoom,
             maxZoom,
-            tooltip
+            tooltip,
+            source,
+            notePath
         }: MarkerProperties
     ) {
         super();
+        this.source = source;
+        this.notePath = notePath;
+        const editable = mutable || source === "frontmatter";
 
         const markerIcon =
             this.map.markerIcons.get(type) ??
@@ -222,8 +240,8 @@ export class Marker extends Layer<DivIconMarker> {
             loc,
             {
                 icon,
-                keyboard: mutable && !this.map.options.lock,
-                draggable: mutable && !this.map.options.lock,
+                keyboard: editable && !this.map.options.lock,
+                draggable: editable && !this.map.options.lock,
                 bubblingMouseEvents: true
             },
             {
@@ -239,6 +257,9 @@ export class Marker extends Layer<DivIconMarker> {
         this.description = description;
         this.layer = layer;
         this.mutable = mutable;
+        if (this.source === "frontmatter") {
+            this.pinOnDisk = [loc.lat, loc.lng];
+        }
         this.command = command;
         this.divIcon = icon;
         this.percent = percent;
@@ -273,7 +294,7 @@ export class Marker extends Layer<DivIconMarker> {
                     this.map.beginOverlayDrawingContext(evt, this);
                     return;
                 }
-                if (!this.mutable) {
+                if (!this.editable) {
                     new Notice(
                         t(
                             "This marker cannot be edited because it was defined in the code block."
@@ -290,6 +311,15 @@ export class Marker extends Layer<DivIconMarker> {
                         this.editMarker()
                     );
                 });
+                if (this.noteBacked) {
+                    menu.addItem((item) => {
+                        item.setTitle(t("Delete Marker")).onClick(() =>
+                            this.deleteFromNote()
+                        );
+                    });
+                    menu.showAtMouseEvent(evt.originalEvent);
+                    return;
+                }
                 menu.addItem((item) => {
                     item.setTitle(t("Convert to Code Block")).onClick(
                         async () => {
@@ -309,7 +339,7 @@ export class Marker extends Layer<DivIconMarker> {
                 menu.showAtMouseEvent(evt.originalEvent);
             })
             .on("dblclick", (evt) => {
-                if (!this.mutable) {
+                if (!this.editable) {
                     new Notice(
                         t(
                             "This marker cannot be edited because it was defined in the code block."
@@ -361,6 +391,10 @@ export class Marker extends Layer<DivIconMarker> {
                 }
             })
             .on("dragend", (evt: L.LeafletMouseEvent) => {
+                if (this.noteBacked) {
+                    this.dropNoteBacked();
+                    return;
+                }
                 const old = this.loc;
                 this.setLatLng(this.leafletInstance.getLatLng());
                 this.map.trigger("marker-data-updated", this, old);
@@ -401,7 +435,7 @@ export class Marker extends Layer<DivIconMarker> {
             }
         });
         this.map.on("lock", () => {
-            if (!this.mutable) return;
+            if (!this.editable) return;
             this.registerForShow(() => {
                 if (!this.leafletInstance.dragging) return;
                 if (this.map.options.lock) {
@@ -424,11 +458,88 @@ export class Marker extends Layer<DivIconMarker> {
             }
         );
     }
+    /** True when this marker's source of truth is a note's `location` frontmatter. */
+    get noteBacked() {
+        return this.source === "frontmatter" && !!this.notePath;
+    }
+    /** Draggable / editable on the map: plugin-owned markers and note-backed ones. */
+    get editable() {
+        return this.mutable || this.noteBacked;
+    }
+
+    /** Snap the marker back to `pin` without writing anything. */
+    private snapTo(pin: Pin) {
+        const latlng = L.latLng(pin[0], pin[1]);
+        this.loc = latlng;
+        this.leafletInstance.setLatLng(latlng);
+        this.pinOnDisk = pin;
+    }
+
+    /** A note-backed marker was dropped: validate, write the note, or snap back. */
+    private async dropNoteBacked() {
+        const app = this.map.plugin.app;
+        const dropped = this.leafletInstance.getLatLng();
+        const pin = roundPin([dropped.lat, dropped.lng]);
+
+        if (this.map.type === "image") {
+            const b = this.map.bounds;
+            const inside = withinBounds(
+                [pin[0] - b.getSouth(), pin[1] - b.getWest()],
+                {
+                    height: b.getNorth() - b.getSouth(),
+                    width: b.getEast() - b.getWest()
+                }
+            );
+            if (!inside) {
+                new Notice("That is outside the map. The pin was not moved.");
+                this.snapTo(this.pinOnDisk);
+                return;
+            }
+        }
+
+        try {
+            await writeNotePin(app, this.notePath, { location: pin }, this.pinOnDisk);
+            this.snapTo(pin);
+        } catch (e) {
+            this.recoverFromNote(e);
+        }
+    }
+
+    /** The note wins: reload the marker from it and say why the write was refused. */
+    private recoverFromNote(e: unknown) {
+        const app = this.map.plugin.app;
+        const fromNote = readNotePin(app, this.notePath);
+        if (fromNote) this.snapTo(fromNote);
+        else this.snapTo(this.pinOnDisk);
+        new Notice(
+            e instanceof NoteChangedError
+                ? `The note changed since the map was drawn (${e.message}). Reopen the map to refresh.`
+                : `Could not update the note: ${(e as Error)?.message ?? e}`
+        );
+    }
+
+    /** Delete from the map = remove `location` + `mapmarker` from the note, after confirming. */
+    async deleteFromNote() {
+        const app = this.map.plugin.app;
+        const name = this.notePath.split("/").pop().replace(/\.md$/, "");
+        if (!(await confirmPinRemoval(app, name))) return;
+        try {
+            await writeNotePin(app, this.notePath, { remove: true }, this.pinOnDisk);
+        } catch (e) {
+            this.recoverFromNote(e);
+            return;
+        }
+        this.map.removeMarker(this);
+        this.map.trigger("marker-deleted", this);
+    }
+
     editMarker() {
         let markerSettingsModal = new MarkerContextModal(this, this.map);
 
         markerSettingsModal.onClose = async () => {
-            if (markerSettingsModal.deleted) {
+            if (markerSettingsModal.deleted && this.noteBacked) {
+                await this.deleteFromNote();
+            } else if (markerSettingsModal.deleted) {
                 this.map.removeMarker(this);
                 this.map.trigger("marker-deleted", this);
             } else {
@@ -446,6 +557,19 @@ export class Marker extends Layer<DivIconMarker> {
                 this.minZoom = markerSettingsModal.tempMarker.minZoom;
                 this.maxZoom = markerSettingsModal.tempMarker.maxZoom;
                 this.command = markerSettingsModal.tempMarker.command;
+
+                if (this.noteBacked) {
+                    // Only the marker type is part of the note contract.
+                    try {
+                        await writeNotePin(this.map.plugin.app, this.notePath, {
+                            mapmarker: this.type === "default" ? null : this.type
+                        });
+                    } catch (e) {
+                        new Notice(
+                            `Could not update the note: ${(e as Error)?.message ?? e}`
+                        );
+                    }
+                }
 
                 if (
                     this.shouldShow(this.map.leafletInstance.getZoom()) &&

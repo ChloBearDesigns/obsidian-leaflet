@@ -1,3 +1,4 @@
+import { isEditablePinFrontmatter } from "src/utils/notePin";
 import { ungzip } from "pako";
 import {
     MarkdownRenderChild,
@@ -60,7 +61,10 @@ type ImmutableMarker = [
     desc: string,
     minZoom: number,
     maxZoom: number,
-    tag?: string
+    tag?: string,
+    /** Set when the marker comes from a note's single `location` pair (markerFolder / markerFile only). */
+    source?: "frontmatter",
+    notePath?: string
 ];
 type ImmutableOverlay = [
     color: string,
@@ -696,7 +700,10 @@ export class LeafletRenderer extends MarkdownRenderChild {
                 id,
                 desc,
                 minZoom,
-                maxZoom
+                maxZoom,
+                _tag,
+                source,
+                notePath
             ]) => {
                 return {
                     type,
@@ -711,7 +718,9 @@ export class LeafletRenderer extends MarkdownRenderChild {
                     minZoom,
                     maxZoom,
                     tooltip: "hover",
-                    zoom: undefined
+                    zoom: undefined,
+                    source,
+                    notePath
                 };
             }
         );
@@ -925,6 +934,12 @@ export class LeafletRenderer extends MarkdownRenderChild {
                 linksFrom.length
             ) {
                 let files = new Set(markerFile);
+                /**
+                 * Files named by `markerFile` / `markerFolder` only. Notes that
+                 * arrive through tags or links stay read-only, so the map never
+                 * rewrites a note the block did not name directly.
+                 */
+                const explicit = new Set<string>(markerFile);
 
                 const sub = this.sourcePath.substring(
                     0,
@@ -937,6 +952,7 @@ export class LeafletRenderer extends MarkdownRenderChild {
                         sub
                     ));
                     collectFiles(abstractFile, files, depth);
+                    collectFiles(abstractFile, explicit, depth);
                 }
                 //get cache
                 //error is thrown here because plugins isn't exposed on Obsidian App
@@ -1155,6 +1171,11 @@ export class LeafletRenderer extends MarkdownRenderChild {
                                 }
                             }
 
+                            const noteBacked =
+                                explicit.has(link) &&
+                                locations.length === 1 &&
+                                isEditablePinFrontmatter(frontmatter);
+
                             markers.push([
                                 frontmatter.mapmarker ||
                                     this.plugin.getIconForTag(tags) ||
@@ -1167,7 +1188,10 @@ export class LeafletRenderer extends MarkdownRenderChild {
                                 id,
                                 null,
                                 min,
-                                max
+                                max,
+                                undefined,
+                                noteBacked ? "frontmatter" : undefined,
+                                noteBacked ? file.path : undefined
                             ]);
                         }
                         /* watchers.set(file, watchers.get(file).add(id)); */
