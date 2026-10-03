@@ -109,3 +109,16 @@ export function flowLocationInText(noteText: string): string {
         "location: [$1, $2]"
     );
 }
+
+const WIKILINK = /\[\[[^\]]+\]\]/;
+
+/**
+ * A `location` used as a link to a place (`"[[The Grand Market Ward]]"`, e.g. on a Job
+ * Board note), not as coordinates. The map skips these quietly instead of raising
+ * "Could not parse location" (plans/leaflet-link-location.md in funky-dnd-mcp).
+ */
+export function isLinkLocation(value: unknown): boolean {
+    const isLink = (v: unknown) => typeof v === "string" && WIKILINK.test(v);
+    if (Array.isArray(value)) return value.length > 0 && value.every(isLink);
+    return isLink(value);
+}

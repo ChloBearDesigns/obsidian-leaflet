@@ -16,7 +16,7 @@ import { LeafletSymbol } from "src/utils/leaflet-import";
 import { LeafletRenderer } from "src/renderer/renderer";
 import t from "src/l10n/locale";
 import { Marker, Overlay } from "src/layer";
-import { isHiddenValue } from "src/utils/notePin";
+import { isHiddenValue, isLinkLocation } from "src/utils/notePin";
 const L = window[LeafletSymbol];
 
 export class Watcher extends Component {
@@ -365,7 +365,10 @@ export default class OldWatcher extends Events {
                 overlays.push(...this.frontmatter.mapoverlay);
             }
         }
-        if (this.fileIds.has("overlayTag")) {
+        if (
+            this.fileIds.has("overlayTag") &&
+            !isLinkLocation(this.frontmatter.location)
+        ) {
             if (this.map.options.overlayTag in this.frontmatter) {
                 this.map.overlays = this.map.overlays.filter(
                     ({ id, leafletInstance }) => {

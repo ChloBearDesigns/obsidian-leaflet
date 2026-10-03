@@ -1,4 +1,8 @@
-import { isEditablePinFrontmatter, isHiddenValue } from "src/utils/notePin";
+import {
+    isEditablePinFrontmatter,
+    isHiddenValue,
+    isLinkLocation
+} from "src/utils/notePin";
 import { ungzip } from "pako";
 import {
     MarkdownRenderChild,
@@ -1129,7 +1133,11 @@ export class LeafletRenderer extends MarkdownRenderChild {
                     /** Every marker and overlay this note draws hides with it. */
                     const hidden = isHiddenValue(frontmatter.maphidden);
 
-                    if (frontmatter.location) {
+                    // `location: "[[Place]]"` is a link (Job Board notes), not a pin: skip quietly.
+                    if (
+                        frontmatter.location &&
+                        !isLinkLocation(frontmatter.location)
+                    ) {
                         let locations = frontmatter.location;
                         if (
                             locations.length &&
@@ -1306,7 +1314,7 @@ export class LeafletRenderer extends MarkdownRenderChild {
                         }
 
                         let location = frontmatter.location;
-                        if (!location) continue;
+                        if (!location || isLinkLocation(location)) continue;
                         if (
                             location instanceof Array &&
                             !(location[0] instanceof Array)
