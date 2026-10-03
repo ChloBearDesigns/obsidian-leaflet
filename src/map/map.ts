@@ -58,6 +58,10 @@ import { ShapeProperties } from "src/draw/shape";
 import LayerControl from "src/controls/layers";
 import type { FilterMarkers } from "src/controls/filter";
 import { LockControl, lockControl } from "src/controls/lock";
+import {
+    HiddenPinsControl,
+    hiddenPinsControl
+} from "src/controls/hiddenPins";
 
 let L = window[LeafletSymbol];
 declare module "leaflet" {
@@ -79,6 +83,9 @@ export abstract class BaseMap extends Events implements BaseMapDefinition {
     filterControl: FilterMarkers;
     tileOverlayLayer: L.FeatureGroup<L.TileLayer>;
     lockControl: LockControl;
+    hiddenPinsControl: HiddenPinsControl;
+    /** DM view draws hidden pins (ghosted). Never saved: every map starts in player view. */
+    dmView = false;
     abstract get bounds(): L.LatLngBounds;
 
     canvas: L.Canvas;
@@ -297,8 +304,23 @@ export abstract class BaseMap extends Events implements BaseMapDefinition {
         return this.markers.filter(
             (marker) =>
                 (marker.layer === this.currentGroup.id || !marker.layer) &&
-                this.displaying.get(marker.type)
+                this.displaying.get(marker.type) &&
+                marker.drawable
         );
+    }
+    get hasHiddenPins() {
+        return (
+            this.markers.some((m) => m.hidden) ||
+            this.overlays.some((o) => o.hidden)
+        );
+    }
+    setDmView(dmView: boolean) {
+        if (this.dmView === dmView) return;
+        this.dmView = dmView;
+        for (const marker of this.markers) marker.refreshDrawn();
+        for (const overlay of this.overlays) overlay.refreshDrawn();
+        this.hiddenPinsControl?.setState(dmView);
+        this.trigger("markers-updated");
     }
 
     private distanceLines: L.Polyline[] = [];
@@ -405,11 +427,15 @@ export abstract class BaseMap extends Events implements BaseMapDefinition {
                 minZoom: marker.minZoom,
                 maxZoom: marker.maxZoom,
                 source: marker.source,
-                notePath: marker.notePath
+                notePath: marker.notePath,
+                hidden: marker.hidden
             });
             this.markers.push(newMarker);
             toReturn.push(newMarker);
         }
+        // Only once the markers are in `this.markers`, so the DM View button's
+        // `hasHiddenPins` check can see them (a map reopened with a hidden pin).
+        if (toReturn.some((m) => m.hidden)) this.trigger("hidden-pins-changed");
         return toReturn;
     }
 
@@ -469,6 +495,7 @@ export abstract class BaseMap extends Events implements BaseMapDefinition {
         existing.minZoom = marker.minZoom;
         existing.maxZoom = marker.maxZoom;
         existing.command = marker.command;
+        existing.setHidden(marker.hidden);
 
         if (existing.shouldShow(this.leafletInstance.getZoom())) {
             existing.show();
@@ -483,6 +510,7 @@ export abstract class BaseMap extends Events implements BaseMapDefinition {
             this.overlays.push(new Overlay(this, overlay));
         }
         this.sortOverlays();
+        if (overlays.some((o) => o.hidden)) this.trigger("hidden-pins-changed");
     }
     createOverlay(overlay: SavedOverlayData) {
         this.addOverlay(overlay);
@@ -730,6 +758,10 @@ export abstract class BaseMap extends Events implements BaseMapDefinition {
         this.lockControl = lockControl({ position: "topright" }, this).addTo(
             this.leafletInstance
         );
+        this.hiddenPinsControl = hiddenPinsControl(
+            { position: "topright" },
+            this
+        ).addTo(this.leafletInstance);
         zoomControl({ position: "topleft" }, this).addTo(this.leafletInstance);
         resetZoomControl({ position: "topleft" }, this).addTo(
             this.leafletInstance

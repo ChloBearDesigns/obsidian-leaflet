@@ -4,7 +4,9 @@ import {
     applyPinToFrontmatter,
     flowLocationInText,
     isEditablePinFrontmatter,
+    isHiddenValue,
     roundPin,
+    shouldDraw,
     withinBounds
 } from "../src/utils/notePin.ts";
 
@@ -61,4 +63,37 @@ test("flowLocationInText turns Obsidian's block list into a flow list", () => {
     assert.equal(flowLocationInText(already), already);
     const other = "---\ntags:\n  - a\n  - b\n---\n";
     assert.equal(flowLocationInText(other), other);
+});
+
+test("isHiddenValue: true-ish hides, false-ish shows, anything else hides", () => {
+    for (const v of [true, "true", "TRUE", "yes", " Yes "]) {
+        assert.equal(isHiddenValue(v), true, `${JSON.stringify(v)} should hide`);
+    }
+    for (const v of [false, "false", "no", "NO", undefined, null]) {
+        assert.equal(isHiddenValue(v), false, `${JSON.stringify(v)} should show`);
+    }
+    for (const v of ["secret", "", 1, 0, [], {}]) {
+        assert.equal(isHiddenValue(v), true, `${JSON.stringify(v)} should hide (fail-safe)`);
+    }
+});
+
+test("shouldDraw: player view skips hidden pins, DM view draws all", () => {
+    assert.equal(shouldDraw(false, false), true);
+    assert.equal(shouldDraw(true, false), false);
+    assert.equal(shouldDraw(true, true), true);
+    assert.equal(shouldDraw(false, true), true);
+});
+
+test("applyPinToFrontmatter hidden sets or deletes maphidden only", () => {
+    const fm: Record<string, unknown> = { location: [1, 2], mapmarker: "City", tags: "settlement" };
+    applyPinToFrontmatter(fm, { hidden: true });
+    assert.deepEqual(fm, { location: [1, 2], mapmarker: "City", tags: "settlement", maphidden: true });
+    applyPinToFrontmatter(fm, { hidden: false });
+    assert.deepEqual(fm, { location: [1, 2], mapmarker: "City", tags: "settlement" });
+});
+
+test("applyPinToFrontmatter remove also deletes maphidden", () => {
+    const fm: Record<string, unknown> = { location: [1, 2], mapmarker: "City", maphidden: true, region: "Coast" };
+    applyPinToFrontmatter(fm, { remove: true });
+    assert.deepEqual(fm, { region: "Coast" });
 });

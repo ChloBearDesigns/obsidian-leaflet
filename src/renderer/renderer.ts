@@ -1,4 +1,4 @@
-import { isEditablePinFrontmatter } from "src/utils/notePin";
+import { isEditablePinFrontmatter, isHiddenValue } from "src/utils/notePin";
 import { ungzip } from "pako";
 import {
     MarkdownRenderChild,
@@ -64,14 +64,17 @@ type ImmutableMarker = [
     tag?: string,
     /** Set when the marker comes from a note's single `location` pair (markerFolder / markerFile only). */
     source?: "frontmatter",
-    notePath?: string
+    notePath?: string,
+    /** The note has `maphidden` (plans/leaflet-hidden-pins.md in funky-dnd-mcp). */
+    hidden?: boolean
 ];
 type ImmutableOverlay = [
     color: string,
     loc: [number, number],
     length: string,
     desc: string,
-    id: string
+    id: string,
+    hidden?: boolean
 ];
 
 export class LeafletRenderer extends MarkdownRenderChild {
@@ -703,7 +706,8 @@ export class LeafletRenderer extends MarkdownRenderChild {
                 maxZoom,
                 _tag,
                 source,
-                notePath
+                notePath,
+                hidden
             ]) => {
                 return {
                     type,
@@ -720,14 +724,15 @@ export class LeafletRenderer extends MarkdownRenderChild {
                     tooltip: "hover",
                     zoom: undefined,
                     source,
-                    notePath
+                    notePath,
+                    hidden
                 };
             }
         );
 
         let immutableOverlayArray: SavedOverlayData[] = [...immutableOverlays]
             .filter((f) => f && f.length)
-            .map(([color, loc, length, desc, id = getId()]) => {
+            .map(([color, loc, length, desc, id = getId(), hidden]) => {
                 const match = `${length}`.match(OVERLAY_TAG_REGEX) ?? [];
 
                 if (!match || isNaN(Number(match[1]))) {
@@ -746,7 +751,8 @@ export class LeafletRenderer extends MarkdownRenderChild {
                     layer: this.params.layers[0],
                     desc: desc,
                     id: id,
-                    mutable: false
+                    mutable: false,
+                    hidden
                 };
             });
 
@@ -1120,6 +1126,8 @@ export class LeafletRenderer extends MarkdownRenderChild {
                         continue;
 
                     const id = getId();
+                    /** Every marker and overlay this note draws hides with it. */
+                    const hidden = isHiddenValue(frontmatter.maphidden);
 
                     if (frontmatter.location) {
                         let locations = frontmatter.location;
@@ -1191,7 +1199,8 @@ export class LeafletRenderer extends MarkdownRenderChild {
                                 max,
                                 undefined,
                                 noteBacked ? "frontmatter" : undefined,
-                                noteBacked ? file.path : undefined
+                                noteBacked ? file.path : undefined,
+                                hidden
                             ]);
                         }
                         /* watchers.set(file, watchers.get(file).add(id)); */
@@ -1231,7 +1240,11 @@ export class LeafletRenderer extends MarkdownRenderChild {
                                     id,
                                     description,
                                     min,
-                                    max
+                                    max,
+                                    undefined,
+                                    undefined,
+                                    undefined,
+                                    hidden
                                 ]);
                             }
                         );
@@ -1270,7 +1283,8 @@ export class LeafletRenderer extends MarkdownRenderChild {
                                     loc as [number, number],
                                     length,
                                     desc ?? t(`%1 overlay`, file.basename),
-                                    id
+                                    id,
+                                    hidden
                                 ]);
                             }
                         );
@@ -1304,7 +1318,8 @@ export class LeafletRenderer extends MarkdownRenderChild {
                             location[0],
                             frontmatter[overlayTag],
                             `${file.basename}: ${overlayTag}`,
-                            id
+                            id,
+                            hidden
                         ]);
 
                         idMap.set("overlayTag", id);

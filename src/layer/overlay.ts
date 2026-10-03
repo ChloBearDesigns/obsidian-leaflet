@@ -8,6 +8,7 @@ import { formatLatLng, formatNumber } from "src/utils";
 import { DISTANCE_DECIMALS, MODIFIER_KEY } from "src/utils";
 import { LeafletSymbol } from "src/utils/leaflet-import";
 import { Layer } from "../layer/layer";
+import { shouldDraw } from "src/utils/notePin";
 
 let L = window[LeafletSymbol];
 export class Overlay extends Layer<L.Circle> {
@@ -113,10 +114,44 @@ export class Overlay extends Layer<L.Circle> {
         this.bindEvents();
     }
 
+    /**
+     * Hidden with its note (`maphidden`), or with the marker it belongs to: a circle
+     * around a hidden place gives the place away.
+     */
+    get hidden() {
+        if (this.data.hidden) return true;
+        if (!this.data.id) return false;
+        return !!this.map.markers.find(({ id }) => id === this.data.id)?.hidden;
+    }
+    get drawable() {
+        return shouldDraw(this.hidden, this.map.dmView);
+    }
+
     show() {
-        if (this.group) {
+        if (this.group && this.drawable) {
             this.group.addLayer(this.leafletInstance);
+            this.applyGhost();
         }
+    }
+
+    /** Re-apply the player/DM-view gate after `hidden` or the map's view changed. */
+    refreshDrawn() {
+        if (!this.drawable) {
+            this.leafletInstance.remove();
+            return;
+        }
+        if (this.map.displaying.get(this.type) === false) return;
+        this.show();
+        this.map.sortOverlays();
+    }
+
+    private applyGhost() {
+        const ghost = this.hidden && this.map.dmView;
+        this.leafletInstance.setStyle({
+            opacity: ghost ? 0.5 : 1,
+            fillOpacity: ghost ? 0.08 : 0.2,
+            dashArray: ghost ? "6 6" : null
+        });
     }
 
     private bindEvents() {

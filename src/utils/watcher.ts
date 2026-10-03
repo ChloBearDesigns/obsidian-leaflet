@@ -16,6 +16,7 @@ import { LeafletSymbol } from "src/utils/leaflet-import";
 import { LeafletRenderer } from "src/renderer/renderer";
 import t from "src/l10n/locale";
 import { Marker, Overlay } from "src/layer";
+import { isHiddenValue } from "src/utils/notePin";
 const L = window[LeafletSymbol];
 
 export class Watcher extends Component {
@@ -230,6 +231,9 @@ export default class OldWatcher extends Events {
         this.frontmatter = cache.frontmatter;
         let overlays = [];
         const markers = this.map.getMarkersById(this.fileIds.get("marker"));
+        /** A reveal (or hide) from the map, the MCP or a hand edit shows up live. */
+        const hidden = isHiddenValue(this.frontmatter.maphidden);
+        for (const marker of markers ?? []) marker.setHidden(hidden);
 
         if (
             markers &&
@@ -331,7 +335,8 @@ export default class OldWatcher extends Events {
                             description: description,
                             minZoom: null,
                             maxZoom: null,
-                            tooltip: "hover"
+                            tooltip: "hover",
+                            hidden
                         });
                     }
                 );
@@ -412,11 +417,20 @@ export default class OldWatcher extends Events {
                         layer: this.map.currentGroup.id,
                         desc: desc,
                         id: id,
-                        mutable: false
+                        mutable: false,
+                        hidden
                     };
                 }
             );
             this.map.addOverlay(...overlayArray);
+        }
+        const ids = new Set(this.fileIds.values());
+        for (const overlay of this.map.overlays) {
+            if (!overlay.id || !ids.has(overlay.id)) continue;
+            if (overlay.data.hidden === hidden) continue;
+            overlay.data.hidden = hidden;
+            overlay.refreshDrawn();
+            this.map.trigger("hidden-pins-changed");
         }
     }
     private _onRename(file: TAbstractFile) {

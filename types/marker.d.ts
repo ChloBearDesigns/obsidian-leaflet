@@ -28,6 +28,8 @@ export interface MarkerProperties {
     source?: "frontmatter";
     /** Vault path of the note a `source: "frontmatter"` marker writes back to. */
     notePath?: string;
+    /** Not drawn in player view (`maphidden` on the note, or `hidden` in data.json). */
+    hidden?: boolean;
 }
 
 export interface SavedMarkerProperties {
@@ -51,4 +53,6 @@ export interface SavedMarkerProperties {
     tooltip: TooltipDisplay;
     source?: "frontmatter";
     notePath?: string;
+    /** Not drawn in player view. Saved for plugin-owned markers only when true. */
+    hidden?: boolean;
 }
