@@ -62,6 +62,13 @@ Spec: `funky-dnd-mcp/plans/leaflet-hidden-pins.md`.
   `Overlay.show()`, `BaseMap.displayed` and the filter control's per-type `show`. Ghosting and the
   button's visibility use inline styles, so deploying is still `main.js` only.
 
+## Link-valued `location` (`fix/link-location`)
+
+Spec: `funky-dnd-mcp/plans/leaflet-link-location.md`. A note whose `location` is a wikilink
+(`location: "[[The Grand Market Ward]]"`, the Job Board convention) is skipped quietly: no marker, no
+"Could not parse location" notice. Real coordinate typos still raise the notice. `isLinkLocation` in
+`notePin.ts`; checked in `getImmutableItems` (location loop and `overlayTag`) and `OldWatcher`.
+
 ```
 npm test          # unit tests for notePin.ts (node's built-in type stripping, Node >= 22.6)
 npm run build     # -> main.js

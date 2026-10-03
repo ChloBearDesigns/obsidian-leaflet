@@ -5,6 +5,7 @@ import {
     flowLocationInText,
     isEditablePinFrontmatter,
     isHiddenValue,
+    isLinkLocation,
     roundPin,
     shouldDraw,
     withinBounds
@@ -96,4 +97,16 @@ test("applyPinToFrontmatter remove also deletes maphidden", () => {
     const fm: Record<string, unknown> = { location: [1, 2], mapmarker: "City", maphidden: true, region: "Coast" };
     applyPinToFrontmatter(fm, { remove: true });
     assert.deepEqual(fm, { region: "Coast" });
+});
+
+test("isLinkLocation: wikilink strings, or lists of them", () => {
+    assert.equal(isLinkLocation("[[The Grand Market Ward]]"), true);
+    assert.equal(isLinkLocation("[[A|alias]]"), true);
+    assert.equal(isLinkLocation(["[[A]]", "[[B]]"]), true);
+});
+
+test("isLinkLocation: coordinates and malformed values are not links", () => {
+    for (const v of [[1705, 729], [[1, 2], [3, 4]], "1705, 729", ["[[A]]", 5], "", [], undefined]) {
+        assert.equal(isLinkLocation(v), false, `${JSON.stringify(v)} is not a link`);
+    }
 });
