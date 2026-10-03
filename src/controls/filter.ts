@@ -198,7 +198,7 @@ export class FilterMarkers extends FontAwesomeControl {
     private show(type: string) {
         this.map.currentGroup.markers[type].addTo(this.leafletInstance);
         this.map.overlays
-            .filter((o) => o.type === type)
+            .filter((o) => o.type === type && o.drawable)
             .forEach((o) =>
                 o.leafletInstance.addTo(this.map.currentGroup.group)
             );

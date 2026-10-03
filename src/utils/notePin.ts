@@ -16,7 +16,9 @@ export interface PinChange {
     location?: Pin;
     /** A marker type to write, or `null` to remove `mapmarker`. */
     mapmarker?: string | null;
-    /** Remove `location` and `mapmarker` (and nothing else). */
+    /** `true` writes `maphidden: true`; `false` deletes the key (revealed). */
+    hidden?: boolean;
+    /** Remove `location`, `mapmarker` and `maphidden` (and nothing else). */
     remove?: boolean;
 }
 
@@ -66,11 +68,35 @@ export function applyPinToFrontmatter(
     if (change.remove) {
         delete fm.location;
         delete fm.mapmarker;
+        delete fm.maphidden;
         return;
     }
     if (change.location) fm.location = [change.location[0], change.location[1]];
     if (change.mapmarker === null) delete fm.mapmarker;
     else if (change.mapmarker !== undefined) fm.mapmarker = change.mapmarker;
+    if (change.hidden === true) fm.maphidden = true;
+    else if (change.hidden === false) delete fm.maphidden;
+}
+
+/**
+ * Whether a note's `maphidden` value hides its pins from players
+ * (plans/leaflet-hidden-pins.md §1 in funky-dnd-mcp). `true` / "true" / "yes" hide;
+ * `false` / "false" / "no" / no key show. Anything else hides too: a typo should hide
+ * a spoiler, not show it.
+ */
+export function isHiddenValue(value: unknown): boolean {
+    if (value === undefined || value === null || value === false) return false;
+    if (value === true) return true;
+    if (typeof value === "string") {
+        const v = value.trim().toLowerCase();
+        if (v === "false" || v === "no") return false;
+    }
+    return true;
+}
+
+/** Player view (the default) never draws a hidden pin; DM view draws everything. */
+export function shouldDraw(hidden: boolean, dmView: boolean): boolean {
+    return !hidden || dmView;
 }
 
 /**

@@ -21,4 +21,6 @@ export interface SavedOverlayData {
     mutable: boolean;
     tooltip?: TooltipDisplay;
     marker?: string;
+    /** From a note with `maphidden`: not drawn in player view. */
+    hidden?: boolean;
 }

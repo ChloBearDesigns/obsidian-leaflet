@@ -172,6 +172,10 @@ declare abstract class BaseMap /* <
 
     displaying: Map<string, boolean>;
     get displayed(): Marker[];
+    /** DM view: hidden pins are drawn (ghosted). Never saved; every map starts in player view. */
+    dmView: boolean;
+    setDmView(dmView: boolean): void;
+    get hasHiddenPins(): boolean;
     distanceAlongPolylines(polylines: L.Polyline[]): string;
     drawingLayer: L.LayerGroup;
 

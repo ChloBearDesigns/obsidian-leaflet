@@ -14,7 +14,7 @@ import { Layer } from "../layer/layer";
 import { popup } from "src/map/popup";
 import { MODIFIER_KEY, OBSIDIAN_LEAFLET_POPOVER_SOURCE } from "src/utils";
 import { copyToClipboard, formatLatLng } from "src/utils";
-import { roundPin, withinBounds } from "src/utils/notePin";
+import { roundPin, shouldDraw, withinBounds } from "src/utils/notePin";
 import type { Pin } from "src/utils/notePin";
 import {
     NoteChangedError,
@@ -25,6 +25,7 @@ import {
 
 import { LeafletSymbol } from "../utils/leaflet-import";
 import t from "src/l10n/locale";
+import { icon as faIcon } from "src/utils/icons";
 let L = window[LeafletSymbol];
 
 abstract class MarkerTarget {
@@ -198,6 +199,8 @@ export class Marker extends Layer<DivIconMarker> {
     notePath?: string;
     /** The `location` the note held when the map last read or wrote it. */
     private pinOnDisk?: Pin;
+    /** Hidden from players: not drawn in player view, ghosted in DM view. */
+    hidden: boolean = false;
     constructor(
         public map: BaseMapType,
         {
@@ -214,12 +217,14 @@ export class Marker extends Layer<DivIconMarker> {
             maxZoom,
             tooltip,
             source,
-            notePath
+            notePath,
+            hidden
         }: MarkerProperties
     ) {
         super();
         this.source = source;
         this.notePath = notePath;
+        this.hidden = !!hidden;
         const editable = mutable || source === "frontmatter";
 
         const markerIcon =
@@ -286,8 +291,100 @@ export class Marker extends Layer<DivIconMarker> {
     get group() {
         return this.mapLayer?.markers[this.type];
     }
+
+    /** False in player view for a hidden marker: it must not be added to the map at all. */
+    get drawable() {
+        return shouldDraw(this.hidden, this.map.dmView);
+    }
+
+    /** Hide from or reveal to players, in this view only (the caller persists it). */
+    setHidden(hidden: boolean) {
+        if (this.hidden === hidden) return;
+        this.hidden = hidden;
+        this.refreshDrawn();
+        this.map.trigger("hidden-pins-changed");
+    }
+
+    /** Re-apply the player/DM-view gate after `hidden` or the map's view changed. */
+    refreshDrawn() {
+        if (!this.drawable) {
+            this.hide();
+        } else if (!this.displayed) {
+            this.show();
+        }
+        this.applyGhost();
+        for (const overlay of this.map.overlays) {
+            if (overlay.id && overlay.id === this.id) overlay.refreshDrawn();
+        }
+    }
+
+    /**
+     * Match dragging to the map's lock. Leaflet only creates `dragging` the first time a
+     * marker is drawn, and then from `options.draggable`, so a marker that was off the map
+     * when the lock changed (hidden, filtered out, outside its zoom range) has to have its
+     * options updated too, and the lock re-applied each time it is drawn.
+     */
+    private applyLock() {
+        const canDrag = this.editable && !this.map.options.lock;
+        this.leafletInstance.options.draggable = canDrag;
+        this.leafletInstance.options.keyboard = canDrag;
+        const dragging = this.leafletInstance.dragging;
+        if (!dragging) return;
+        if (canDrag) dragging.enable();
+        else dragging.disable();
+    }
+
+    /**
+     * DM view marks hidden pins (faded, with an eye-slash badge) so the DM can tell
+     * them apart. Inline styles, so the fork still deploys as `main.js` alone.
+     */
+    private applyGhost() {
+        const el = this.leafletInstance?.getElement?.();
+        if (!el) return;
+        const ghost = this.hidden && this.map.dmView;
+        el.toggleClass("leaflet-hidden-pin", ghost);
+        el.style.filter = ghost ? "grayscale(0.7) opacity(0.5)" : "";
+        let badge = el.querySelector<HTMLElement>(".leaflet-hidden-pin-badge");
+        if (ghost && !badge) {
+            badge = el.createSpan({ cls: "leaflet-hidden-pin-badge" });
+            badge.setAttr(
+                "style",
+                "position:absolute;top:-4px;right:-8px;width:12px;height:12px;" +
+                    "pointer-events:none;color:var(--text-error, #e93147);"
+            );
+            badge.appendChild(
+                faIcon({ prefix: "fas", iconName: "eye-slash" }).node[0]
+            );
+        } else if (!ghost && badge) {
+            badge.remove();
+        }
+    }
+
+    /** Context-menu Hide / Reveal: a note-backed marker writes `maphidden`, a plugin-owned one saves. */
+    private async toggleHidden() {
+        const hidden = !this.hidden;
+        if (this.noteBacked) {
+            try {
+                await writeNotePin(
+                    this.map.plugin.app,
+                    this.notePath,
+                    { hidden },
+                    this.pinOnDisk
+                );
+            } catch (e) {
+                this.recoverFromNote(e);
+                return;
+            }
+            this.setHidden(hidden);
+            return;
+        }
+        this.setHidden(hidden);
+        this.map.trigger("marker-updated", this);
+        this.map.trigger("should-save");
+    }
     private bindEvents() {
         this.leafletInstance
+            .on("add", () => this.applyGhost())
             .on("contextmenu", (evt: L.LeafletMouseEvent) => {
                 L.DomEvent.stopPropagation(evt);
                 if (evt.originalEvent.getModifierState("Shift")) {
@@ -310,6 +407,11 @@ export class Marker extends Layer<DivIconMarker> {
                     item.setTitle(t("Edit Marker")).onClick(() =>
                         this.editMarker()
                     );
+                });
+                menu.addItem((item) => {
+                    item.setTitle(
+                        this.hidden ? "Reveal to players" : "Hide from players"
+                    ).onClick(() => this.toggleHidden());
                 });
                 if (this.noteBacked) {
                     menu.addItem((item) => {
@@ -436,15 +538,7 @@ export class Marker extends Layer<DivIconMarker> {
         });
         this.map.on("lock", () => {
             if (!this.editable) return;
-            this.registerForShow(() => {
-                if (!this.leafletInstance.dragging) return;
-                if (this.map.options.lock) {
-                    this.leafletInstance.dragging.disable();
-                } else {
-                    this.leafletInstance.dragging.enable();
-                }
-                this.leafletInstance.options.keyboard = !this.map.options.lock;
-            });
+            this.registerForShow(() => this.applyLock());
         });
 
         this.map.leafletInstance.on(
@@ -670,6 +764,7 @@ export class Marker extends Layer<DivIconMarker> {
         this.type = x.type;
         this._icon = x;
         this.leafletInstance.setIcon(x.icon);
+        this.applyGhost();
     }
     get latLng() {
         return this.loc;
@@ -703,12 +798,14 @@ export class Marker extends Layer<DivIconMarker> {
 
     show() {
         if (
+            this.drawable &&
             this.shouldShow(this.map.getZoom()) &&
             this.group &&
             !this.displayed
         ) {
             this.group.addLayer(this.leafletInstance);
             this.displayed = true;
+            this.applyLock();
             if (this.tooltip === "always" && this.target) {
                 this.leafletInstance.on("add", () => {
                     this.popup.open(this.target.display);
@@ -767,7 +864,8 @@ export class Marker extends Layer<DivIconMarker> {
             description: this.description,
             minZoom: this.minZoom,
             maxZoom: this.maxZoom,
-            tooltip: this.tooltip
+            tooltip: this.tooltip,
+            ...(this.hidden ? { hidden: true } : {})
         };
     }
 
