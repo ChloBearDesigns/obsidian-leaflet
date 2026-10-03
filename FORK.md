@@ -1,15 +1,24 @@
 # ChloBearDesigns/obsidian-leaflet — fork notes
 
 A local fork of [`javalent/obsidian-leaflet`](https://github.com/javalent/obsidian-leaflet)
-v6.0.5 for the D&D vaults. Three changes sit on top of upstream; upstream is the `upstream` remote.
+v6.0.5 for the D&D vaults. **`main` is upstream plus every fork change**; upstream is the `upstream`
+remote. (Until 2026-10-03 the changes lived on stacked branches; they were fast-forwarded into
+`main` and the branches deleted.)
 
-| Branch | Change |
+| Change | Spec (in `funky-dnd-mcp/plans/`) |
 |---|---|
-| `patch/popout-window-drag` | Map pan + marker drag work in Obsidian pop-out windows. See [POPOUT-WINDOW-PATCH.md](POPOUT-WINDOW-PATCH.md). |
-| `feat/editable-frontmatter-pins` (stacked on the above) | Note-backed markers editable from the map, and `data.json` save safety. Below. |
-| `feat/hidden-pins` (stacked on the above) | Hidden pins: `maphidden` keeps a place off the players' map until revealed; DM View button. Below. |
+| Map pan + marker drag work in Obsidian pop-out windows. See [POPOUT-WINDOW-PATCH.md](POPOUT-WINDOW-PATCH.md). | — |
+| Note-backed markers editable from the map, and `data.json` save safety. Below. | `leaflet-editable-pins.md` |
+| Hidden pins: `maphidden` keeps a place off the players' map until revealed; DM View button. Below. | `leaflet-hidden-pins.md` |
+| Link-valued `location` (`"[[Place]]"`) skipped quietly instead of a parse notice. Below. | `leaflet-link-location.md` |
 
-## Note-backed markers (`feat/editable-frontmatter-pins`)
+## Working on the fork
+
+Branch off `main`, open a PR into `main` on `ChloBearDesigns/obsidian-leaflet` (pass
+`--repo ChloBearDesigns/obsidian-leaflet` to `gh`, or it may target upstream). Local `main` tracks
+`origin/main`, never `upstream/main`. No PRs go to upstream without a separate decision.
+
+## Note-backed markers
 
 Spec: `funky-dnd-mcp/plans/leaflet-editable-pins.md`.
 
@@ -36,7 +45,7 @@ maps instead of being overwritten by the next save. Overlays and drawn shapes ar
 
 Pure logic lives in `src/utils/notePin.ts`; Obsidian I/O in `src/layer/notePinIO.ts`.
 
-## Hidden pins (`feat/hidden-pins`)
+## Hidden pins
 
 Spec: `funky-dnd-mcp/plans/leaflet-hidden-pins.md`.
 
@@ -62,7 +71,7 @@ Spec: `funky-dnd-mcp/plans/leaflet-hidden-pins.md`.
   `Overlay.show()`, `BaseMap.displayed` and the filter control's per-type `show`. Ghosting and the
   button's visibility use inline styles, so deploying is still `main.js` only.
 
-## Link-valued `location` (`fix/link-location`)
+## Link-valued `location`
 
 Spec: `funky-dnd-mcp/plans/leaflet-link-location.md`. A note whose `location` is a wikilink
 (`location: "[[The Grand Market Ward]]"`, the Job Board convention) is skipped quietly: no marker, no
@@ -87,24 +96,24 @@ Upstream is at **v6.0.5** (checked 2026-09-20), the version this fork is based o
 `javalent/obsidian-leaflet` releases something newer:
 
 1. **Do not** use Obsidian's community-plugin "Update" button — it overwrites `main.js` in that
-   vault with stock Leaflet and silently drops both patches. If it happens, rebuild from this repo
-   and copy `main.js` back (or restore `main.js.pre-editable-pins.bak`).
+   vault with stock Leaflet and silently drops every fork change. If it happens, rebuild from this
+   repo and copy `main.js` back.
 2. `git fetch upstream`, then read the upstream changelog for changes to the code the patches touch:
    `src/layer/marker.ts`, `src/renderer/renderer.ts` (`loadImmutableData`, `getImmutableItems`),
    `src/modals/context.ts`, `src/main.ts` (`saveSettings`), and the bundled `leaflet` version. Hidden
    pins also touch `src/layer/layer.ts` / `src/layer/overlay.ts` (`show`), `src/map/map.ts`
    (`displayed`, `addMarker`, `updateMarker`, controls), `src/controls/filter.ts` (`show`) and
    `src/utils/watcher.ts` (`OldWatcher._onChange`).
-3. Rebase in order: `patch/popout-window-drag` onto the new upstream tag, then
-   `feat/editable-frontmatter-pins` onto that, then `feat/hidden-pins` onto that. If the bundled `leaflet` version changed, the
-   `patch-package` patch in `patches/` will not apply — regenerate it (see POPOUT-WINDOW-PATCH.md).
+3. On a branch off `main` (e.g. `chore/upstream-6.x`), `git merge upstream/main` (or the release
+   tag) and resolve conflicts once, then PR it into `main`. If the bundled `leaflet` version changed,
+   the `patch-package` patch in `patches/` will not apply — regenerate it (see POPOUT-WINDOW-PATCH.md).
 4. `npm install && npm test && npm run build`.
 5. Copy `main.js` into **both** vaults' `.obsidian/plugins/obsidian-leaflet-plugin/` (keep the old one
    as a `.bak`), then reload the plugin.
 6. Re-run the manual checks in `funky-dnd-mcp/plans/leaflet-editable-pins.md`: at minimum fixtures 5
    (drag persists, flow list, nothing in `data.json`), 7, 8, 9 and 12 (pop-out window); and in
    `plans/leaflet-hidden-pins.md` at minimum 8, 10 and 12 (hidden by default, nothing leaks, live
-   reveal in a pop-out).
+   reveal in a pop-out); and `plans/leaflet-link-location.md` 3 (no Job Board notice).
 7. Update the "based on" version in this file and in `campaign-ops/memory/project_leaflet-popout-patched-fork.md`.
 
 If upstream ever ships its own fix for pop-out windows (issue #421) or for editing note-backed
